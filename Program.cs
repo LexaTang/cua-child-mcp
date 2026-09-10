@@ -25,11 +25,18 @@ internal static class Native
         if (!WTSQuerySessionInformation(IntPtr.Zero, id, 8, out var buffer, out _)) return false;
         try { return Marshal.ReadInt32(buffer) == 0; } finally { WTSFreeMemory(buffer); }
     }
-    internal static void Enable()
+    internal const string SignInAgain = "Windows Child Sessions were just enabled. Save your work, sign out of Windows and sign in again (or restart), then retry. The existing parent logon may not have credentials for automatic child-session sign-in.";
+    internal const string CredentialHelp = "If localhost asks for credentials after first-time setup, save your work and sign out of Windows and sign in again (or restart). If it persists, report the Windows edition and sign-in method; see README troubleshooting.";
+    internal static bool Enable()
     {
         if (!WTSIsChildSessionsEnabled(out bool enabled)) throw new Win32Exception(Marshal.GetLastWin32Error());
         if (!enabled && !WTSEnableChildSessions(true))
             throw new Win32Exception(Marshal.GetLastWin32Error(), "Enabling Windows Child Sessions requires an administrator. Run cua-child enable once from an elevated terminal.");
+        return !enabled;
+    }
+    internal static void EnableForConnection()
+    {
+        if (Enable()) throw new InvalidOperationException(SignInAgain);
     }
 }
 
@@ -74,7 +81,7 @@ internal static class Program
                 return 0;
             }
             if (options.Command == "self-test") return Tests.Run();
-            if (options.Command == "enable") { Native.Enable(); Console.Error.WriteLine("Child Sessions enabled."); return 0; }
+            if (options.Command == "enable") { bool changed = Native.Enable(); Console.Error.WriteLine(changed ? Native.SignInAgain : "Child Sessions already enabled. " + Native.CredentialHelp); return 0; }
             if (options.Command == "status")
             {
                 Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new { childSessionId = Native.ChildId(), workerReady = Ready(), socket = Socket }));
@@ -137,7 +144,7 @@ internal static class Program
                 if (File.Exists(errorFile)) throw new InvalidOperationException(File.ReadAllText(errorFile));
                 Thread.Sleep(200);
             }
-            throw new TimeoutException($"Child worker did not become ready. See {StateDir}");
+            throw new TimeoutException($"Child worker did not become ready. {Native.CredentialHelp} See {StateDir}");
         }
         finally { gate.ReleaseMutex(); }
     }

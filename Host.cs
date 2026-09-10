@@ -66,7 +66,7 @@ internal sealed class Host : Form
         try
         {
             // Reuse an existing child (including one hosted by another application).
-            if (Native.ChildId() is not uint existing || !Native.Active(existing)) { Native.Enable(); rdp.ConnectChild(); }
+            if (Native.ChildId() is not uint existing || !Native.Active(existing)) { Native.EnableForConnection(); rdp.ConnectChild(); }
             timer.Start();
         }
         catch (Exception ex) { Fail(ex); }
@@ -82,7 +82,7 @@ internal sealed class Host : Form
                 return;
             }
             if (workerSeen) throw new IOException("Child worker or session stopped. Restart the MCP client to reconnect.");
-            if (startup.Elapsed.TotalSeconds > options.Timeout) throw new TimeoutException("RDP/worker startup timed out. Check host-error.txt and Windows Task Scheduler.", launchError);
+            if (startup.Elapsed.TotalSeconds > options.Timeout) throw new TimeoutException("RDP/worker startup timed out. " + Native.CredentialHelp + " Check host-error.txt and Windows Task Scheduler.", launchError);
             if (!workerLaunched && Native.ChildId() is uint child && Native.Active(child))
             {
                 taskName = "CuaChild-worker-" + Program.Identity;

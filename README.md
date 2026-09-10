@@ -21,7 +21,7 @@
 }
 ```
 
-首次启动可能需要管理员启用 Windows Child Sessions：在管理员终端执行一次 `cua-child.exe enable`，然后以普通用户运行 MCP 客户端。便携包自带 .NET 运行时和固定版本 Driver，无需安装 Node、Python 或 Rust。
+首次启动可能需要管理员启用 Windows Child Sessions：在管理员终端执行一次 `cua-child.exe enable`，保存工作并注销 Windows 后重新登录（或重启电脑），然后以普通用户运行 MCP 客户端。便携包自带 .NET 运行时和固定版本 Driver，无需安装 Node、Python 或 Rust。
 
 Codex 可使用以下配置（启动超时给首次创建子桌面留出时间）：
 
@@ -57,6 +57,14 @@ dotnet build -c Release
 打包脚本下载 `cua-driver-rs-v0.26.1` 的 Windows x64 发布包，对照官方 SHA-256 清单校验，生成 self-contained 可执行程序和 MCP 配置。Windows CI 也提供构建产物。
 
 图标源图为 `assets/icon.png`，封面直接使用同一图形；`assets/app.ico` 包含 16、20、24、32、40、48、64、128、256 像素版本。执行 `scripts/build-icon.ps1` 可从源图重新生成 ICO。ICO 嵌入 EXE，并用于控制窗口、任务栏与托盘。
+
+## localhost 提示凭据不工作
+
+首次启用后，先保存工作并**注销 Windows 后重新登录，或重启电脑**，再运行程序。只关闭程序、重启 MCP 客户端或锁屏解锁，不能替代重新登录。
+
+[微软的 Child Sessions 文档](https://learn.microsoft.com/en-us/windows/win32/termserv/child-sessions)说明：主会话在启用子会话之前就已登录，或使用智能卡登录时，子会话可能要求凭据，不能保证自动登录。因此在新电脑上刚启用就连接，可能遇到该提示。
+
+如果重新登录后仍然出现，请提供 Windows 版本/版本号、账号类型（本地、Microsoft、域或 Entra ID）、登录方式（密码、PIN、指纹或智能卡）、`cua-child.exe status` 的输出及 `host-error.txt`（如果存在）。不要提供密码。这些信息用于区分父会话凭据、系统策略和 RDP 连接问题；本程序不自动修改凭据委派策略或关闭 NLA。
 
 ## 自动构建与发布
 

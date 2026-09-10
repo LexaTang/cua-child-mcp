@@ -60,7 +60,7 @@ internal sealed class Viewer : Form
         try
         {
             if (rdp.Connected != 0) return;
-            Native.Enable();
+            Native.EnableForConnection();
             status.Text = "正在连接子桌面…";
             connecting.Restart();
             rdp.ConnectChild();
