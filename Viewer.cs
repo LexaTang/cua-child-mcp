@@ -79,16 +79,19 @@ internal sealed class Viewer : Form
         try
         {
             uint? child = Native.ChildId();
-            if (rdp.Connected == 1)
+            int connectionState = rdp.Connected;
+            if (connectionState == 1)
             {
                 if (originalSession.HasValue && child != originalSession)
                 {
                     status.Text = "会话已变化，请检查当前桌面";
                     return;
                 }
-                status.Text = $"子会话 {child} · {rdp.LastLoginEvent ?? "RDP 已连接，等待登录事件"} · { (Program.Ready() ? "MCP 就绪" : "MCP 未就绪") }";
+                status.Text = $"子会话 {child} · {rdp.LastLoginEvent ?? "RDP 已连接"} · { (Program.Ready() ? "MCP 就绪" : "MCP 未就绪") }";
                 if (!connectedOnce) { connectedOnce = true; rdp.Focus(); }
             }
+            else if (connectionState == 2)
+                status.Text = $"正在建立 RDP 连接 · 已等待 {connecting.Elapsed.TotalSeconds:F0} 秒";
             else if (connecting.Elapsed.TotalSeconds > 90 || connectedOnce)
                 status.Text = "连接已断开，可点击“重新连接”";
         }

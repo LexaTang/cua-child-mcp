@@ -22,6 +22,7 @@ if ($binary.DirectoryName -ne $driverDir) { Copy-Item "$($binary.DirectoryName)\
 dotnet publish "$PSScriptRoot/CuaChild.csproj" -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o $OutputDirectory --nologo
 if ($LASTEXITCODE) { throw 'dotnet publish failed' }
 Copy-Item "$PSScriptRoot/README.md" $OutputDirectory -Force
+Copy-Item "$PSScriptRoot/scripts/collect-rdp-connection.ps1" $OutputDirectory -Force
 Copy-Item "$PSScriptRoot/assets" $OutputDirectory -Recurse -Force
 Copy-Item "$PSScriptRoot/LICENSE" $OutputDirectory -Force
 Copy-Item "$PSScriptRoot/CUA-LICENSE.md" (Join-Path $OutputDirectory 'CUA-LICENSE') -Force

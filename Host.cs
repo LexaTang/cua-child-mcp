@@ -17,10 +17,19 @@ internal sealed class RdpControl : AxHost
     private static readonly Guid EventsId = new("336D5562-EFA8-482E-8CB3-C5C0FC7A7DB6");
     private readonly List<(int Id, Delegate Handler)> eventHandlers = new();
     private object? eventSource;
+    private int? lastRecordedState;
     internal string? LastLoginEvent { get; private set; }
     internal string DiagnosticFile { get; } = Path.Combine(Program.StateDir, $"rdp-{Environment.ProcessId}.log");
     internal RdpControl() : base("A0C63C30-F08D-4AB4-907C-34905D770C7D") { }
-    internal int Connected => Convert.ToInt32(((dynamic)GetOcx()!).Connected);
+    internal int Connected
+    {
+        get
+        {
+            int state = Convert.ToInt32(((dynamic)GetOcx()!).Connected);
+            if (state != lastRecordedState) { Record($"Connected state={state} (0=disconnected, 1=connected, 2=connecting)"); lastRecordedState = state; }
+            return state;
+        }
+    }
     internal void AttachDiagnosticEvents()
     {
         if (eventSource is not null) return;
@@ -78,7 +87,10 @@ internal sealed class RdpControl : AxHost
     }
     internal void ConnectChild()
     {
-        AttachDiagnosticEvents();
+        // Keep COM event instrumentation opt-in until real-connection compatibility
+        // has been verified. Default connections use the original no-sink path.
+        bool traceEvents = Environment.GetEnvironmentVariable("CUA_CHILD_RDP_EVENTS") == "1";
+        if (traceEvents) AttachDiagnosticEvents();
         LastLoginEvent = null;
         dynamic rdp = GetOcx()!;
         object yes = true;
@@ -94,7 +106,7 @@ internal sealed class RdpControl : AxHost
         rdp.AdvancedSettings2.RedirectDrives = false;
         rdp.AdvancedSettings6.RedirectClipboard = false;
         ((IExtendedSettings)GetOcx()!).SetProperty("ConnectToChildSession", ref yes);
-        Record($"ConnectChild: os={Environment.OSVersion.Version}, parent={Process.GetCurrentProcess().SessionId}, ConnectToChildSession set=true, CredSSP=true");
+        Record($"ConnectChild: exe={Environment.ProcessPath}, pid={Environment.ProcessId}, os={Environment.OSVersion.Version}, parent={Process.GetCurrentProcess().SessionId}, server=localhost, configuredRdpPort={rdp.AdvancedSettings7.RDPPort}, ConnectToChildSession set=true, CredSSP=true, eventTrace={traceEvents}. Configured port is not proof of the child transport's actual endpoint.");
         GetOcx()!.GetType().InvokeMember("Connect", System.Reflection.BindingFlags.InvokeMethod, null, GetOcx(), null);
     }
 }
