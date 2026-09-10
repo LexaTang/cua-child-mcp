@@ -14,10 +14,72 @@ internal interface IExtendedSettings
 }
 internal sealed class RdpControl : AxHost
 {
+    private static readonly Guid EventsId = new("336D5562-EFA8-482E-8CB3-C5C0FC7A7DB6");
+    private readonly List<(int Id, Delegate Handler)> eventHandlers = new();
+    private object? eventSource;
+    internal string? LastLoginEvent { get; private set; }
+    internal string DiagnosticFile { get; } = Path.Combine(Program.StateDir, $"rdp-{Environment.ProcessId}.log");
     internal RdpControl() : base("A0C63C30-F08D-4AB4-907C-34905D770C7D") { }
     internal int Connected => Convert.ToInt32(((dynamic)GetOcx()!).Connected);
+    internal void AttachDiagnosticEvents()
+    {
+        if (eventSource is not null) return;
+        eventSource = GetOcx()!;
+        try
+        {
+            Subscribe(1, (Action)(() => Record("OnConnecting")));
+            Subscribe(2, (Action)(() => Record("OnConnected (transport only)")));
+            Subscribe(3, (Action)(() => { LastLoginEvent = "Windows 登录已完成"; Record("OnLoginComplete"); }));
+            Subscribe(4, (Action<int>)(reason => Record($"OnDisconnected reason={reason}")));
+            Subscribe(10, (Action<int>)(code => Record($"OnFatalError code={code} (0x{code:X8})")));
+            Subscribe(22, (Action<int>)(code =>
+            {
+                LastLoginEvent = $"登录事件 {code} (0x{code:X8})";
+                Record($"OnLogonError code={code} (0x{code:X8})");
+            }));
+            Record("RDP event subscriptions attached");
+        }
+        catch { RemoveDiagnosticEvents(); throw; }
+    }
+    private void Subscribe(int id, Delegate handler)
+    {
+        ComEventsHelper.Combine(eventSource!, EventsId, id, handler);
+        eventHandlers.Add((id, handler));
+    }
+    private void Record(string message)
+    {
+        // Diagnostics must never break COM callbacks or capture credentials.
+        try
+        {
+            Directory.CreateDirectory(Program.StateDir);
+            if (File.Exists(DiagnosticFile) && new FileInfo(DiagnosticFile).Length > 1024 * 1024)
+                File.Move(DiagnosticFile, DiagnosticFile + ".previous", true);
+            File.AppendAllText(DiagnosticFile, $"{DateTimeOffset.Now:O} {message}{Environment.NewLine}");
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+    }
+    private void RemoveDiagnosticEvents()
+    {
+        if (eventSource is null) return;
+        foreach (var (id, handler) in eventHandlers)
+        {
+            try { ComEventsHelper.Remove(eventSource, EventsId, id, handler); }
+            catch (COMException) { }
+            catch (InvalidComObjectException) { }
+        }
+        eventHandlers.Clear();
+        eventSource = null;
+    }
+    protected override void DetachSink()
+    {
+        RemoveDiagnosticEvents();
+        base.DetachSink();
+    }
     internal void ConnectChild()
     {
+        AttachDiagnosticEvents();
+        LastLoginEvent = null;
         dynamic rdp = GetOcx()!;
         object yes = true;
         rdp.Server = "localhost";
@@ -32,6 +94,7 @@ internal sealed class RdpControl : AxHost
         rdp.AdvancedSettings2.RedirectDrives = false;
         rdp.AdvancedSettings6.RedirectClipboard = false;
         ((IExtendedSettings)GetOcx()!).SetProperty("ConnectToChildSession", ref yes);
+        Record($"ConnectChild: os={Environment.OSVersion.Version}, parent={Process.GetCurrentProcess().SessionId}, ConnectToChildSession set=true, CredSSP=true");
         GetOcx()!.GetType().InvokeMember("Connect", System.Reflection.BindingFlags.InvokeMethod, null, GetOcx(), null);
     }
 }

@@ -70,6 +70,8 @@ dotnet build -c Release
 
 如果重新登录后仍然出现，请提供 Windows 版本/版本号、账号类型（本地、Microsoft、域或 Entra ID）、登录方式（密码、PIN、指纹或智能卡）、`cua-child.exe status` 的输出及 `host-error.txt`（如果存在）。不要提供密码。这些信息用于区分父会话凭据、系统策略和 RDP 连接问题；本程序不自动修改凭据委派策略或关闭 NLA。
 
+控制窗口的“打开诊断日志”按钮可打开日志目录。`rdp-进程号.log` 记录连接、Windows 登录完成、登录错误及断开事件，包含十进制和十六进制登录错误码，不记录密码。RDP 已连接不等于 Windows 登录已完成。日志单文件超过 1 MiB 时保留一份上一段记录；各次运行的日志可在诊断后手动清理。
+
 ## 自动构建与发布
 
 GitHub Actions 在推送 `main`、提交 PR 或手动运行时编译 Windows x64 便携包，执行 CLI 自检，并上传 ZIP 和 SHA-256 文件作为构建产物。

@@ -34,7 +34,13 @@ internal sealed class Viewer : Form
         reconnect.Click += (_, _) => Connect();
         var hide = new Button { Text = "隐藏到托盘", AutoSize = true };
         hide.Click += (_, _) => Hide();
-        bar.Controls.AddRange([focus, reconnect, hide, status]);
+        var logs = new Button { Text = "打开诊断日志", AutoSize = true };
+        logs.Click += (_, _) =>
+        {
+            Directory.CreateDirectory(Program.StateDir);
+            Process.Start(new ProcessStartInfo("explorer.exe", Host.Quote(Program.StateDir)) { UseShellExecute = true });
+        };
+        bar.Controls.AddRange([focus, reconnect, hide, logs, status]);
         var hint = new Label { Dock = DockStyle.Bottom, Height = 30, TextAlign = ContentAlignment.MiddleLeft,
             Text = "  点击画面后即可操作子桌面 · Ctrl+Alt+Home 释放键盘 · 关闭窗口只隐藏，应用与 MCP 继续运行" };
         Controls.Add(rdp);
@@ -80,7 +86,7 @@ internal sealed class Viewer : Form
                     status.Text = "会话已变化，请检查当前桌面";
                     return;
                 }
-                status.Text = $"子会话 {child} · 已连接 · { (Program.Ready() ? "MCP 就绪" : "MCP 未就绪") }";
+                status.Text = $"子会话 {child} · {rdp.LastLoginEvent ?? "RDP 已连接，等待登录事件"} · { (Program.Ready() ? "MCP 就绪" : "MCP 未就绪") }";
                 if (!connectedOnce) { connectedOnce = true; rdp.Focus(); }
             }
             else if (connecting.Elapsed.TotalSeconds > 90 || connectedOnce)

@@ -50,7 +50,7 @@ internal sealed record Options(string Command, string Driver, int Timeout)
         {
             switch (args[i])
             {
-                case "mcp" or "host" or "view" or "viewer-host" or "enable" or "status" or "self-test" or "config": command = args[i]; break;
+                case "mcp" or "host" or "view" or "viewer-host" or "enable" or "status" or "self-test" or "rdp-self-test" or "config": command = args[i]; break;
                 case "--help" or "-h": command = "help"; break;
                 case "--driver": driver = Path.GetFullPath(args[++i]); break;
                 case "--timeout": timeout = int.Parse(args[++i]); break;
@@ -81,6 +81,7 @@ internal static class Program
                 return 0;
             }
             if (options.Command == "self-test") return Tests.Run();
+            if (options.Command == "rdp-self-test") return Tests.RunRdp();
             if (options.Command == "config")
             {
                 var server = new { command = Path.Combine(AppContext.BaseDirectory, "cua-child.exe"), args = new[] { "mcp", "--driver", options.Driver, "--timeout", options.Timeout.ToString() } };
@@ -90,7 +91,7 @@ internal static class Program
             if (options.Command == "enable") { bool changed = Native.Enable(); Console.Error.WriteLine(changed ? Native.SignInAgain : "Child Sessions already enabled. " + Native.CredentialHelp); return 0; }
             if (options.Command == "status")
             {
-                Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new { childSessionId = Native.ChildId(), workerReady = Ready(), socket = Socket }));
+                Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new { childSessionId = Native.ChildId(), workerReady = Ready(), socket = Socket, logDirectory = StateDir }));
                 return 0;
             }
             if (!File.Exists(options.Driver)) throw new FileNotFoundException("Bundled driver missing; run package.ps1 or pass --driver.", options.Driver);
