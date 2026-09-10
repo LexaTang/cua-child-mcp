@@ -5,3 +5,4 @@ dist/
 *.pdb
 *.user
 .vs/
+release/

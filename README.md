@@ -6,6 +6,8 @@
 
 ## 使用
 
+从 [Releases](https://github.com/LexaTang/cua-child-mcp/releases) 下载 Windows x64 ZIP，解压到固定目录。每个发布包附带 SHA-256 校验文件；MCP 配置中的程序路径应替换为实际解压路径。
+
 在 Windows 上运行便携包的 `cua-child.exe mcp`，或将它添加为 MCP 服务：
 
 ```json
@@ -55,6 +57,21 @@ dotnet build -c Release
 打包脚本下载 `cua-driver-rs-v0.26.1` 的 Windows x64 发布包，对照官方 SHA-256 清单校验，生成 self-contained 可执行程序和 MCP 配置。Windows CI 也提供构建产物。
 
 图标源图为 `assets/icon.png`，封面直接使用同一图形；`assets/app.ico` 包含 16、20、24、32、40、48、64、128、256 像素版本。执行 `scripts/build-icon.ps1` 可从源图重新生成 ICO。ICO 嵌入 EXE，并用于控制窗口、任务栏与托盘。
+
+## 自动构建与发布
+
+GitHub Actions 在推送 `main`、提交 PR 或手动运行时编译 Windows x64 便携包，执行 CLI 自检，并上传 ZIP 和 SHA-256 文件作为构建产物。
+
+推送版本标签后，构建成功会自动创建 GitHub Release、生成发布说明并附加 ZIP 和校验文件。例如：
+
+```powershell
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+标签格式为 `v主版本.次版本.修订版本`；`v0.1.0-rc.1` 等带后缀标签自动标记为预发布。附件先上传到草稿，齐全后公开；重跑会恢复未完成的草稿，已公开的版本保持不变。新修改请使用新版本标签。工作流使用 GitHub 自带的 `GITHUB_TOKEN`，无需配置额外密钥。
+
+CI 不运行需要交互桌面的 `integration-test.ps1`；完整 Child Session 功能仍需在 Windows 桌面实机验证。
 
 ## 工作方式与限制
 
