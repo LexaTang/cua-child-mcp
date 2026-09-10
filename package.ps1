@@ -25,6 +25,9 @@ Copy-Item "$PSScriptRoot/README.md" $OutputDirectory -Force
 Copy-Item "$PSScriptRoot/assets" $OutputDirectory -Recurse -Force
 Copy-Item "$PSScriptRoot/LICENSE" $OutputDirectory -Force
 Copy-Item "$PSScriptRoot/CUA-LICENSE.md" (Join-Path $OutputDirectory 'CUA-LICENSE') -Force
-@{ mcpServers = @{ 'cua-child' = @{ command = (Join-Path $OutputDirectory 'cua-child.exe'); args = @('mcp') } } } | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $OutputDirectory 'mcp.json')
+# A portable archive must not ship a config pointing to the build machine.
+# Remove the file produced by older versions when reusing an output directory.
+$oldConfig = Join-Path $OutputDirectory 'mcp.json'
+if (Test-Path -LiteralPath $oldConfig) { Remove-Item -LiteralPath $oldConfig }
 "Driver=$Version`nAsset=$asset`nSHA256=$expected" | Set-Content (Join-Path $OutputDirectory 'driver-version.txt')
 Write-Host "Portable package ready: $OutputDirectory"

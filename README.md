@@ -8,6 +8,10 @@
 
 从 [Releases](https://github.com/LexaTang/cua-child-mcp/releases) 下载 Windows x64 ZIP，解压到固定目录。每个发布包附带 SHA-256 校验文件；MCP 配置中的程序路径应替换为实际解压路径。
 
+在解压目录运行 `./cua-child.exe config`，即可输出当前电脑实际路径对应的 MCP JSON 配置；复制到客户端的 MCP 设置中。移动程序目录后请重新生成。发布包不预生成包含构建机路径的配置。
+
+如果使用 v0.1.0 包里的 `mcp.json` 遇到 `D:\a\...` 路径错误，请将 `command` 改为本机实际的 `cua-child.exe` 完整路径，并删除指向旧路径的 `--driver` 参数（如有）；默认 Driver 位于程序旁的 `driver` 文件夹。只在异常堆栈源码行号中出现的构建路径不代表程序正在访问该路径。
+
 在 Windows 上运行便携包的 `cua-child.exe mcp`，或将它添加为 MCP 服务：
 
 ```json
@@ -54,7 +58,7 @@ dotnet build -c Release
 ./integration-test.ps1
 ```
 
-打包脚本下载 `cua-driver-rs-v0.26.1` 的 Windows x64 发布包，对照官方 SHA-256 清单校验，生成 self-contained 可执行程序和 MCP 配置。Windows CI 也提供构建产物。
+打包脚本下载 `cua-driver-rs-v0.26.1` 的 Windows x64 发布包，对照官方 SHA-256 清单校验，生成 self-contained 可执行程序。MCP 配置通过解压后的 `config` 命令生成。Windows CI 也提供构建产物。
 
 图标源图为 `assets/icon.png`，封面直接使用同一图形；`assets/app.ico` 包含 16、20、24、32、40、48、64、128、256 像素版本。执行 `scripts/build-icon.ps1` 可从源图重新生成 ICO。ICO 嵌入 EXE，并用于控制窗口、任务栏与托盘。
 

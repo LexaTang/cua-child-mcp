@@ -50,7 +50,7 @@ internal sealed record Options(string Command, string Driver, int Timeout)
         {
             switch (args[i])
             {
-                case "mcp" or "host" or "view" or "viewer-host" or "enable" or "status" or "self-test": command = args[i]; break;
+                case "mcp" or "host" or "view" or "viewer-host" or "enable" or "status" or "self-test" or "config": command = args[i]; break;
                 case "--help" or "-h": command = "help"; break;
                 case "--driver": driver = Path.GetFullPath(args[++i]); break;
                 case "--timeout": timeout = int.Parse(args[++i]); break;
@@ -77,10 +77,16 @@ internal static class Program
             var options = Options.Parse(args);
             if (options.Command == "help")
             {
-                Console.WriteLine("cua-child [mcp|view|status|enable] [--driver <cua-driver.exe>] [--timeout <seconds>]\nDefault: ensure a Windows Child Session worker, then proxy upstream stdio MCP.\nThe child session stays alive after MCP disconnects. enable may require elevation.");
+                Console.WriteLine("cua-child [mcp|view|status|enable|config] [--driver <cua-driver.exe>] [--timeout <seconds>]\nDefault: ensure a Windows Child Session worker, then proxy upstream stdio MCP.\nconfig prints MCP JSON for this executable's current location.\nThe child session stays alive after MCP disconnects. enable may require elevation.");
                 return 0;
             }
             if (options.Command == "self-test") return Tests.Run();
+            if (options.Command == "config")
+            {
+                var server = new { command = Path.Combine(AppContext.BaseDirectory, "cua-child.exe"), args = new[] { "mcp", "--driver", options.Driver, "--timeout", options.Timeout.ToString() } };
+                Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new { mcpServers = new Dictionary<string, object> { ["cua-child"] = server } }, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+                return 0;
+            }
             if (options.Command == "enable") { bool changed = Native.Enable(); Console.Error.WriteLine(changed ? Native.SignInAgain : "Child Sessions already enabled. " + Native.CredentialHelp); return 0; }
             if (options.Command == "status")
             {

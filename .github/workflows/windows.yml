@@ -32,6 +32,9 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           ./dist/cua-child.exe --help
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Check package relocation
+        shell: pwsh
+        run: ./scripts/test-portable.ps1
       - name: Archive and checksum
         shell: pwsh
         env:
