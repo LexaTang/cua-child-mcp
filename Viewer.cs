@@ -11,8 +11,8 @@ internal sealed class Viewer : Form
     private readonly NotifyIcon tray;
     private readonly System.Windows.Forms.Timer timer = new() { Interval = 1500 };
     private readonly ToolStrip toolbar = new() { Dock = DockStyle.Fill, GripStyle = ToolStripGripStyle.Hidden, Padding = new Padding(16, 10, 12, 10), BackColor = Color.White, ImageScalingSize = new Size(24, 24), CanOverflow = true };
-    private readonly ToolStripButton connectButton = new("连接桌面");
-    private readonly ToolStripButton fullScreenButton = new("全屏");
+    private readonly ToolStripMenuItem connectButton = new("连接桌面");
+    private readonly ToolStripMenuItem fullScreenButton = new("全屏");
     private readonly StatusStrip statusbar = new() { Dock = DockStyle.Fill, SizingGrip = false, BackColor = Color.White, Padding = new Padding(14, 0, 12, 0) };
     private readonly ToolStripStatusLabel sessionStatus = new("会话 —");
     private readonly ToolStripStatusLabel workerStatus = new("Worker —");
@@ -35,45 +35,45 @@ internal sealed class Viewer : Form
         Ui.Style(this, "Cua Child MCP", new Size(1320, 820));
         StartPosition = FormStartPosition.CenterScreen; MinimumSize = new Size(800, 500);
         try { settings = DesktopSettings.Load(); } catch { settings = new(); }
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 64));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 0));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 24));
         toolbar.Font = Font;
-        var brand = new ToolStripLabel("  CUA CHILD") { Font = new Font("Segoe UI", 10, FontStyle.Bold), ForeColor = Ui.Ink, Margin = new Padding(0, 0, 26, 0), Image = AppBrand.Icon.ToBitmap() };
-        toolbar.Items.Add(brand);
-        connectButton.BackColor = Ui.Accent; connectButton.ForeColor = Color.White; connectButton.Padding = new Padding(14, 4, 14, 4);
+        toolbar.Padding = new Padding(4, 0, 4, 0);
+        toolbar.BackColor = SystemColors.Control;
+        toolbar.RenderMode = ToolStripRenderMode.System;
+        var commands = new ToolStripDropDownButton("菜单") { AccessibleName = "远程桌面菜单" };
+        toolbar.Items.Add(commands);
         connectButton.Click += (_, _) => Manage(async () => { if (rdp.Connected == 0) Connect(); else await DisconnectDisplay(); });
-        toolbar.Items.Add(connectButton);
-        var session = new ToolStripDropDownButton("会话") { Padding = new Padding(10, 4, 10, 4) };
+        commands.DropDownItems.Add(connectButton);
+        var session = new ToolStripMenuItem("会话");
         session.DropDownItems.Add("重新连接画面", null, (_, _) => Manage(async () => { await DisconnectDisplay(); Connect(); }));
         session.DropDownItems.Add(new ToolStripSeparator());
         session.DropDownItems.Add("注销子会话…", null, (_, _) => EndSession(false));
         session.DropDownItems.Add("重建子会话…", null, (_, _) => EndSession(true));
         session.DropDownItems.Add(new ToolStripSeparator());
         session.DropDownItems.Add("启用系统 Child Sessions…", null, (_, _) => EnableSystem());
-        toolbar.Items.Add(session);
-        var mcp = new ToolStripDropDownButton("MCP") { Padding = new Padding(10, 4, 10, 4) };
+        commands.DropDownItems.Add(session);
+        var mcp = new ToolStripMenuItem("MCP");
         mcp.DropDownItems.Add("启动 Worker", null, (_, _) => Manage(StartWorker));
         mcp.DropDownItems.Add("停止 Worker…", null, (_, _) => ChangeWorker(false));
         mcp.DropDownItems.Add("重启 Worker…", null, (_, _) => ChangeWorker(true));
         mcp.DropDownItems.Add(new ToolStripSeparator());
         mcp.DropDownItems.Add("配置管理…", null, (_, _) => OpenMcpConfig());
-        toolbar.Items.Add(mcp);
-        fullScreenButton.Alignment = ToolStripItemAlignment.Right; fullScreenButton.Padding = new Padding(10, 4, 10, 4);
-        fullScreenButton.Click += (_, _) => ToggleFullScreen(); toolbar.Items.Add(fullScreenButton);
-        AddTool("设置", OpenSettings, ToolStripItemAlignment.Right);
-        AddTool("MCP 配置", OpenMcpConfig, ToolStripItemAlignment.Right);
-        var more = new ToolStripDropDownButton("更多") { Alignment = ToolStripItemAlignment.Right };
+        commands.DropDownItems.Add(mcp);
+        commands.DropDownItems.Add("远程桌面设置…", null, (_, _) => OpenSettings());
+        fullScreenButton.Click += (_, _) => ToggleFullScreen(); commands.DropDownItems.Add(fullScreenButton);
+        commands.DropDownItems.Add(new ToolStripSeparator());
+        var more = commands;
         more.DropDownItems.Add("打开日志目录", null, (_, _) => { Directory.CreateDirectory(Program.StateDir); Process.Start(new ProcessStartInfo("explorer.exe", Host.Quote(Program.StateDir)) { UseShellExecute = true }); });
         more.DropDownItems.Add("隐藏到托盘", null, (_, _) => Hide());
         more.DropDownItems.Add("退出控制器", null, (_, _) => { exiting = true; Close(); });
-        toolbar.Items.Add(more);
         empty.RowStyles.Add(new RowStyle(SizeType.Percent, 50)); empty.RowStyles.Add(new RowStyle(SizeType.AutoSize)); empty.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
         var welcome = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Anchor = AnchorStyles.None, Padding = new Padding(28), BackColor = canvas.BackColor };
-        welcome.Controls.Add(new Label { Text = "你的独立桌面", ForeColor = Color.White, Font = new Font("Microsoft YaHei UI", 24, FontStyle.Bold), AutoSize = true, Margin = new Padding(0, 0, 0, 12) });
-        welcome.Controls.Add(new Label { Text = "连接子桌面，继续你的工作。", ForeColor = Color.FromArgb(149, 166, 186), AutoSize = true, Margin = new Padding(0, 0, 0, 22) });
-        welcome.Controls.Add(Ui.Button("连接桌面", () => Manage(() => { Connect(); return Task.CompletedTask; }), true));
+        canvas.BackColor = empty.BackColor = welcome.BackColor = SystemColors.AppWorkspace;
+        welcome.Controls.Add(new Label { Text = "远程桌面", ForeColor = Color.White, Font = new Font("Microsoft YaHei UI", 16), AutoSize = true, Margin = new Padding(0, 0, 0, 8) });
+        welcome.Controls.Add(new Label { Text = "未连接", ForeColor = Color.White, AutoSize = true });
         empty.Controls.Add(welcome, 0, 1);
         canvas.Controls.Add(rdp); canvas.Controls.Add(empty); rdp.Visible = false; empty.BringToFront();
         var dismiss = Ui.Button("关闭", () => { noticePanel.Visible = false; root.RowStyles[1].Height = 0; }); dismiss.Dock = DockStyle.Right;
@@ -87,10 +87,6 @@ internal sealed class Viewer : Form
         tray = new NotifyIcon { Icon = AppBrand.Icon, Text = "Cua Child MCP", ContextMenuStrip = menu, Visible = true };
         tray.DoubleClick += (_, _) => Reveal(); timer.Tick += async (_, _) => await Poll();
         KeyPreview = true; KeyDown += (_, e) => { if (e.KeyCode == Keys.F11 && !rdp.ContainsFocus) { ToggleFullScreen(); e.Handled = true; } };
-    }
-    private void AddTool(string text, Action action, ToolStripItemAlignment alignment)
-    {
-        var button = new ToolStripButton(text) { Alignment = alignment, Padding = new Padding(10, 4, 10, 4) }; button.Click += (_, _) => action(); toolbar.Items.Add(button);
     }
     protected override void OnShown(EventArgs e) { base.OnShown(e); timer.Start(); _ = Poll(); if (Opacity > 0) Activate(); }
     private void Connect()
