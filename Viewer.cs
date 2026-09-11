@@ -3,189 +3,133 @@ using System.Runtime.InteropServices;
 
 namespace CuaChild;
 
-// A visible RDP client for the same Windows Child Session. No screenshots are
-// streamed through MCP: native RDP delivers the user's mouse and keyboard.
 internal sealed class Viewer : Form
 {
-    internal static int VerifyIdlePanel()
-    {
-        uint? before = Native.ChildId();
-        using var signal = new EventWaitHandle(false, EventResetMode.AutoReset);
-        using var form = new Viewer(signal, Options.Parse([]));
-        form.ShowInTaskbar = false;
-        form.StartPosition = FormStartPosition.Manual;
-        form.Location = new(-32000, -32000);
-        form.Opacity = 0;
-        form.Show();
-        Application.DoEvents();
-        if (form.rdp.Connected != 0 || Native.ChildId() != before)
-            throw new Exception("Opening the control panel changed the child connection.");
-        form.exiting = true;
-        form.Close();
-        Console.Error.WriteLine("Idle control panel verified: no RDP connection or child-session creation.");
-        return 0;
-    }
     private readonly RdpControl rdp = new() { Dock = DockStyle.Fill };
-    private readonly Label status = new() { AutoSize = true, Padding = new Padding(8) };
-    private readonly System.Windows.Forms.Timer timer = new() { Interval = 1000 };
     private readonly EventWaitHandle showEvent;
-    private readonly NotifyIcon tray;
     private readonly Options options;
-    private readonly FlowLayoutPanel panel = new() { Dock = DockStyle.Left, Width = 300, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true, Padding = new Padding(12), BackColor = Color.FromArgb(244, 246, 249) };
-    private readonly NumericUpDown desktopWidth = new() { Minimum = 640, Maximum = 7680, Increment = 160, Width = 250 };
-    private readonly NumericUpDown desktopHeight = new() { Minimum = 480, Maximum = 4320, Increment = 90, Width = 250 };
-    private readonly CheckBox smartSizing = new() { Text = "画面适应窗口", AutoSize = true };
-    private readonly CheckBox clipboard = new() { Text = "共享剪贴板", AutoSize = true };
-    private readonly CheckBox drives = new() { Text = "重定向本机磁盘", AutoSize = true };
-    private readonly ComboBox audio = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 250 };
-    private readonly ComboBox keyboard = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 250 };
-    private readonly ComboBox colors = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 250 };
-    private bool busy, fullScreen;
+    private readonly NotifyIcon tray;
+    private readonly System.Windows.Forms.Timer timer = new() { Interval = 1500 };
+    private readonly ToolStrip toolbar = new() { Dock = DockStyle.Fill, GripStyle = ToolStripGripStyle.Hidden, Padding = new Padding(16, 10, 12, 10), BackColor = Color.White, ImageScalingSize = new Size(24, 24), CanOverflow = true };
+    private readonly ToolStripButton connectButton = new("连接桌面");
+    private readonly ToolStripButton fullScreenButton = new("全屏");
+    private readonly StatusStrip statusbar = new() { Dock = DockStyle.Fill, SizingGrip = false, BackColor = Color.White, Padding = new Padding(14, 0, 12, 0) };
+    private readonly ToolStripStatusLabel sessionStatus = new("会话 —");
+    private readonly ToolStripStatusLabel workerStatus = new("Worker —");
+    private readonly ToolStripStatusLabel displayStatus = new("未连接");
+    private readonly Label notice = new() { Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(18, 0, 8, 0), ForeColor = Color.FromArgb(155, 53, 36), BackColor = Color.FromArgb(255, 242, 235) };
+    private readonly Panel noticePanel = new() { Dock = DockStyle.Fill, Visible = false };
+    private readonly TableLayoutPanel root = new() { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4 };
+    private readonly Panel canvas = new() { Dock = DockStyle.Fill, BackColor = Color.FromArgb(18, 27, 39) };
+    private readonly TableLayoutPanel empty = new() { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, BackColor = Color.FromArgb(18, 27, 39) };
+    private DesktopSettings settings;
+    private bool busy, polling, exiting, fullScreen, connectedOnce;
     private Rectangle savedBounds;
     private FormWindowState savedWindowState;
-    private bool exiting;
-    private bool connectedOnce;
     private readonly Stopwatch connecting = new();
     private static string EventName => @"Local\CuaChild-view-show-" + Program.Identity;
 
     private Viewer(EventWaitHandle showEvent, Options options)
     {
-        this.showEvent = showEvent;
-        this.options = options;
-        Text = "Cua Child MCP · 控制中心";
-        StartPosition = FormStartPosition.CenterScreen;
-        Size = new(1440, 900);
-        MinimumSize = new(1000, 650);
-        Icon = AppBrand.Icon;
-        var bar = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, Padding = new Padding(6) };
-        var focus = new Button { Text = "控制子桌面", AutoSize = true };
-        focus.Click += (_, _) => { rdp.Focus(); };
-        var reconnect = new Button { Text = "重新连接", AutoSize = true };
-        reconnect.Click += (_, _) => Manage(async () => { await DisconnectDisplay(); Connect(); });
-        var hide = new Button { Text = "隐藏到托盘", AutoSize = true };
-        hide.Click += (_, _) => Hide();
-        var logs = new Button { Text = "打开诊断日志", AutoSize = true };
-        logs.Click += (_, _) =>
-        {
-            Directory.CreateDirectory(Program.StateDir);
-            Process.Start(new ProcessStartInfo("explorer.exe", Host.Quote(Program.StateDir)) { UseShellExecute = true });
-        };
-        bar.Controls.AddRange([focus, reconnect, hide, logs, status]);
-        var hint = new Label { Dock = DockStyle.Bottom, Height = 30, TextAlign = ContentAlignment.MiddleLeft,
-            Text = "  点击画面后即可操作子桌面 · Ctrl+Alt+Home 释放键盘 · 关闭窗口只隐藏，应用与 MCP 继续运行" };
-        Controls.Add(rdp);
-        Controls.Add(panel);
-        Controls.Add(bar);
-        Controls.Add(hint);
-        var menu = new ContextMenuStrip();
-        menu.Items.Add("显示子桌面", null, (_, _) => Reveal());
-        menu.Items.Add("隐藏窗口（保持连接）", null, (_, _) => Hide());
-        menu.Items.Add("退出控制器（断开显示，不注销子桌面）", null, (_, _) => { exiting = true; Close(); });
-        tray = new NotifyIcon { Icon = AppBrand.Icon, Text = "Cua 子桌面控制", ContextMenuStrip = menu, Visible = true };
-        tray.DoubleClick += (_, _) => Reveal();
-        timer.Tick += (_, _) => Poll();
-        Section("子会话");
-        AddButton("启动 / 连接子桌面", () => Connect());
-        AddButton("断开画面（保留会话）", () => Manage(DisconnectDisplay));
-        AddButton("注销子会话…", () => EndSession(false));
-        AddButton("重建子会话…", () => EndSession(true));
-        Section("MCP Worker");
-        AddButton("启动 Worker", () => Manage(StartWorker));
-        AddButton("停止 Worker…", () => ChangeWorker(false));
-        AddButton("重启 Worker…", () => ChangeWorker(true));
-        AddButton("复制 MCP 配置", CopyConfig);
-        Section("显示设置（保存后重连生效）");
-        panel.Controls.Add(new Label { Text = "宽度 / 高度（像素）", AutoSize = true });
-        panel.Controls.AddRange([desktopWidth, desktopHeight]);
-        var presets = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 250 };
-        presets.Items.AddRange(["选择分辨率预设", "1280 × 720", "1920 × 1080", "2560 × 1440", "3840 × 2160"]);
-        presets.SelectedIndex = 0;
-        presets.SelectedIndexChanged += (_, _) => { (int W, int H)[] sizes = [(1280,720),(1920,1080),(2560,1440),(3840,2160)]; if (presets.SelectedIndex > 0) { var s = sizes[presets.SelectedIndex - 1]; desktopWidth.Value = s.W; desktopHeight.Value = s.H; } };
-        panel.Controls.Add(presets);
-        colors.Items.AddRange(["32 位颜色", "16 位颜色"]);
-        audio.Items.AddRange(["音频：本机播放", "音频：子桌面播放", "音频：静音"]);
-        keyboard.Items.AddRange(["组合键：本机", "组合键：子桌面", "组合键：仅窗口全屏"]);
-        panel.Controls.AddRange([colors, smartSizing, clipboard, drives, audio, keyboard]);
-        AddButton("保存设置", () => Manage(() => { Settings().Save(); return Task.CompletedTask; }));
-        AddButton("保存并重新连接画面", () => Manage(async () => { Settings().Save(); await DisconnectDisplay(); Connect(); }));
-        AddButton("切换全屏 / 窗口", ToggleFullScreen);
-        AddButton("启用系统 Child Sessions…", EnableSystem);
-        DesktopSettings settings;
+        this.showEvent = showEvent; this.options = options;
+        Ui.Style(this, "Cua Child MCP", new Size(1320, 820));
+        StartPosition = FormStartPosition.CenterScreen; MinimumSize = new Size(800, 500);
         try { settings = DesktopSettings.Load(); } catch { settings = new(); }
-        desktopWidth.Value = settings.Width; desktopHeight.Value = settings.Height;
-        colors.SelectedIndex = settings.ColorDepth == 32 ? 0 : 1;
-        smartSizing.Checked = settings.SmartSizing; clipboard.Checked = settings.Clipboard; drives.Checked = settings.Drives;
-        audio.SelectedIndex = settings.AudioMode; keyboard.SelectedIndex = settings.KeyboardMode;
-        KeyPreview = true;
-        KeyDown += (_, e) => { if (e.KeyCode == Keys.F11 && !rdp.ContainsFocus) { ToggleFullScreen(); e.Handled = true; } };
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 64));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 0));
+        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
+        toolbar.Font = Font;
+        var brand = new ToolStripLabel("  CUA CHILD") { Font = new Font("Segoe UI", 10, FontStyle.Bold), ForeColor = Ui.Ink, Margin = new Padding(0, 0, 26, 0), Image = AppBrand.Icon.ToBitmap() };
+        toolbar.Items.Add(brand);
+        connectButton.BackColor = Ui.Accent; connectButton.ForeColor = Color.White; connectButton.Padding = new Padding(14, 4, 14, 4);
+        connectButton.Click += (_, _) => Manage(async () => { if (rdp.Connected == 0) Connect(); else await DisconnectDisplay(); });
+        toolbar.Items.Add(connectButton);
+        var session = new ToolStripDropDownButton("会话") { Padding = new Padding(10, 4, 10, 4) };
+        session.DropDownItems.Add("重新连接画面", null, (_, _) => Manage(async () => { await DisconnectDisplay(); Connect(); }));
+        session.DropDownItems.Add(new ToolStripSeparator());
+        session.DropDownItems.Add("注销子会话…", null, (_, _) => EndSession(false));
+        session.DropDownItems.Add("重建子会话…", null, (_, _) => EndSession(true));
+        session.DropDownItems.Add(new ToolStripSeparator());
+        session.DropDownItems.Add("启用系统 Child Sessions…", null, (_, _) => EnableSystem());
+        toolbar.Items.Add(session);
+        var mcp = new ToolStripDropDownButton("MCP") { Padding = new Padding(10, 4, 10, 4) };
+        mcp.DropDownItems.Add("启动 Worker", null, (_, _) => Manage(StartWorker));
+        mcp.DropDownItems.Add("停止 Worker…", null, (_, _) => ChangeWorker(false));
+        mcp.DropDownItems.Add("重启 Worker…", null, (_, _) => ChangeWorker(true));
+        mcp.DropDownItems.Add(new ToolStripSeparator());
+        mcp.DropDownItems.Add("配置管理…", null, (_, _) => OpenMcpConfig());
+        toolbar.Items.Add(mcp);
+        fullScreenButton.Alignment = ToolStripItemAlignment.Right; fullScreenButton.Padding = new Padding(10, 4, 10, 4);
+        fullScreenButton.Click += (_, _) => ToggleFullScreen(); toolbar.Items.Add(fullScreenButton);
+        AddTool("设置", OpenSettings, ToolStripItemAlignment.Right);
+        AddTool("MCP 配置", OpenMcpConfig, ToolStripItemAlignment.Right);
+        var more = new ToolStripDropDownButton("更多") { Alignment = ToolStripItemAlignment.Right };
+        more.DropDownItems.Add("打开日志目录", null, (_, _) => { Directory.CreateDirectory(Program.StateDir); Process.Start(new ProcessStartInfo("explorer.exe", Host.Quote(Program.StateDir)) { UseShellExecute = true }); });
+        more.DropDownItems.Add("隐藏到托盘", null, (_, _) => Hide());
+        more.DropDownItems.Add("退出控制器", null, (_, _) => { exiting = true; Close(); });
+        toolbar.Items.Add(more);
+        empty.RowStyles.Add(new RowStyle(SizeType.Percent, 50)); empty.RowStyles.Add(new RowStyle(SizeType.AutoSize)); empty.RowStyles.Add(new RowStyle(SizeType.Percent, 50));
+        var welcome = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Anchor = AnchorStyles.None, Padding = new Padding(28), BackColor = canvas.BackColor };
+        welcome.Controls.Add(new Label { Text = "你的独立桌面", ForeColor = Color.White, Font = new Font("Microsoft YaHei UI", 24, FontStyle.Bold), AutoSize = true, Margin = new Padding(0, 0, 0, 12) });
+        welcome.Controls.Add(new Label { Text = "连接子桌面，继续你的工作。", ForeColor = Color.FromArgb(149, 166, 186), AutoSize = true, Margin = new Padding(0, 0, 0, 22) });
+        welcome.Controls.Add(Ui.Button("连接桌面", () => Manage(() => { Connect(); return Task.CompletedTask; }), true));
+        empty.Controls.Add(welcome, 0, 1);
+        canvas.Controls.Add(rdp); canvas.Controls.Add(empty); rdp.Visible = false; empty.BringToFront();
+        var dismiss = Ui.Button("关闭", () => { noticePanel.Visible = false; root.RowStyles[1].Height = 0; }); dismiss.Dock = DockStyle.Right;
+        noticePanel.Controls.Add(notice); noticePanel.Controls.Add(dismiss);
+        statusbar.Items.Add(displayStatus); statusbar.Items.Add(new ToolStripStatusLabel("  ·  ")); statusbar.Items.Add(sessionStatus); statusbar.Items.Add(new ToolStripStatusLabel("  ·  ")); statusbar.Items.Add(workerStatus);
+        statusbar.Items.Add(new ToolStripStatusLabel { Spring = true }); statusbar.Items.Add(new ToolStripStatusLabel("Ctrl+Alt+Home 释放键盘") { ForeColor = Ui.Muted });
+        root.Controls.Add(toolbar, 0, 0); root.Controls.Add(noticePanel, 0, 1); root.Controls.Add(canvas, 0, 2); root.Controls.Add(statusbar, 0, 3); Controls.Add(root);
+        var menu = new ContextMenuStrip();
+        menu.Items.Add("显示桌面", null, (_, _) => Reveal());
+        menu.Items.Add("退出控制器", null, (_, _) => { exiting = true; Close(); });
+        tray = new NotifyIcon { Icon = AppBrand.Icon, Text = "Cua Child MCP", ContextMenuStrip = menu, Visible = true };
+        tray.DoubleClick += (_, _) => Reveal(); timer.Tick += async (_, _) => await Poll();
+        KeyPreview = true; KeyDown += (_, e) => { if (e.KeyCode == Keys.F11 && !rdp.ContainsFocus) { ToggleFullScreen(); e.Handled = true; } };
     }
-    protected override void OnShown(EventArgs e)
+    private void AddTool(string text, Action action, ToolStripItemAlignment alignment)
     {
-        base.OnShown(e);
-        timer.Start();
-        Poll();
-        if (Opacity > 0) Activate();
+        var button = new ToolStripButton(text) { Alignment = alignment, Padding = new Padding(10, 4, 10, 4) }; button.Click += (_, _) => action(); toolbar.Items.Add(button);
     }
+    protected override void OnShown(EventArgs e) { base.OnShown(e); timer.Start(); _ = Poll(); if (Opacity > 0) Activate(); }
     private void Connect()
     {
+        if (rdp.Connected != 0) return;
+        Native.EnableForConnection(); connecting.Restart(); empty.Visible = false; rdp.Visible = true;
+        rdp.ConnectChild(settings with { KeyboardMode = settings.KeyboardMode == 2 ? (fullScreen ? 1 : 0) : settings.KeyboardMode });
+    }
+    private async Task Poll()
+    {
+        if (polling || IsDisposed) return; polling = true;
         try
         {
-            if (rdp.Connected != 0) return;
-            Native.EnableForConnection();
-            Settings().Save();
-            status.Text = "正在连接子桌面…";
-            connecting.Restart();
-            var settings = Settings();
-            rdp.ConnectChild(settings with { KeyboardMode = settings.KeyboardMode == 2 ? (fullScreen ? 1 : 0) : settings.KeyboardMode });
+            if (showEvent.WaitOne(0)) Reveal();
+            var state = await Task.Run(() => (Child: Native.ChildId(), Ready: Program.Ready()));
+            if (IsDisposed) return;
+            int connection = rdp.Connected;
+            displayStatus.Text = connection == 1 ? "● 已连接" : connection == 2 ? $"正在连接 · {connecting.Elapsed.TotalSeconds:F0}s" : "○ 未连接";
+            displayStatus.ForeColor = connection == 1 ? Ui.Accent : Ui.Muted;
+            sessionStatus.Text = "会话 " + (state.Child?.ToString() ?? "—"); workerStatus.Text = state.Ready ? "Worker 就绪" : "Worker 未就绪";
+            workerStatus.ForeColor = state.Ready ? Ui.Accent : Ui.Muted;
+            connectButton.Text = connection == 0 ? "连接桌面" : connection == 2 ? "取消连接" : "断开画面";
+            rdp.Visible = connection != 0; empty.Visible = connection == 0;
+            if (connection == 1 && !connectedOnce) { connectedOnce = true; if (ContainsFocus) rdp.Focus(); }
         }
-        catch (Exception ex) { status.Text = "连接失败：" + ex.Message; }
+        catch (Exception ex) { if (!IsDisposed) ShowNotice(ex.Message); }
+        finally { polling = false; }
     }
-    private void Poll()
-    {
-        if (showEvent.WaitOne(0)) Reveal();
-        try
-        {
-            uint? child = Native.ChildId();
-            int connectionState = rdp.Connected;
-            if (connectionState == 1)
-            {
-                status.Text = $"子会话 {child} · {rdp.LastLoginEvent ?? "RDP 已连接"} · { (Program.Ready() ? "MCP 就绪" : "MCP 未就绪") }";
-                if (!connectedOnce) { connectedOnce = true; rdp.Focus(); }
-            }
-            else if (connectionState == 2)
-                status.Text = $"正在建立 RDP 连接 · 已等待 {connecting.Elapsed.TotalSeconds:F0} 秒";
-            else
-                status.Text = $"子会话 {child?.ToString() ?? "未创建"} · 画面未连接 · {(Program.Ready() ? "Worker 就绪" : "Worker 未就绪")}";
-        }
-        catch (Exception ex) { status.Text = ex.Message; }
-    }
-    private void Reveal()
-    {
-        Show();
-        if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
-        Activate();
-        rdp.Focus();
-    }
-    private void Section(string title) => panel.Controls.Add(new Label { Text = title, AutoSize = true, Font = new Font(Font, FontStyle.Bold), Margin = new Padding(0, 12, 0, 6) });
-    private void AddButton(string title, Action action)
-    {
-        var button = new Button { Text = title, Width = 250, Height = 30 };
-        button.Click += (_, _) => { if (!busy) action(); };
-        panel.Controls.Add(button);
-    }
-    private DesktopSettings Settings() => new() { Width = (int)desktopWidth.Value, Height = (int)desktopHeight.Value, ColorDepth = colors.SelectedIndex == 0 ? 32 : 16, SmartSizing = smartSizing.Checked, Clipboard = clipboard.Checked, Drives = drives.Checked, AudioMode = audio.SelectedIndex, KeyboardMode = keyboard.SelectedIndex };
+    private void ShowNotice(string text) { notice.Text = text; root.RowStyles[1].Height = 54; noticePanel.Visible = true; }
     private async void Manage(Func<Task> action)
     {
-        if (busy) return;
-        busy = true; panel.Enabled = false;
+        if (busy) return; busy = true; toolbar.Enabled = false; empty.Enabled = false;
         try { await action(); }
-        catch (Exception ex) { MessageBox.Show(this, ex.Message, "操作未完成", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
-        finally { busy = false; if (!IsDisposed) { panel.Enabled = true; Poll(); } }
+        catch (Exception ex) { if (!IsDisposed) ShowNotice(ex.Message); }
+        finally { busy = false; if (!IsDisposed) { toolbar.Enabled = true; empty.Enabled = true; await Poll(); } }
     }
     private async Task DisconnectDisplay()
     {
-        rdp.DisconnectChild();
-        var wait = Stopwatch.StartNew();
+        rdp.DisconnectChild(); var wait = Stopwatch.StartNew();
         while (rdp.Connected != 0) { if (wait.Elapsed.TotalSeconds > 15) throw new TimeoutException("显示连接未能及时断开。"); await Task.Delay(100); }
         connectedOnce = false;
     }
@@ -197,44 +141,67 @@ internal sealed class Viewer : Form
     }
     private void ChangeWorker(bool restart)
     {
-        if (MessageBox.Show(this, "这会中断当前 MCP 调用，但不注销子桌面。继续？", "管理 Worker", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+        if (busy || MessageBox.Show(this, "这会中断当前 MCP 调用。继续？", restart ? "重启 Worker" : "停止 Worker", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
         Manage(async () => { await Task.Run(() => SessionManager.Stop(false)); if (restart) await StartWorker(); });
     }
     private void EndSession(bool restart)
     {
-        if (MessageBox.Show(this, "这会关闭子桌面中的所有程序，未保存内容可能丢失。不会注销主桌面。继续？", restart ? "重建子会话" : "注销子会话", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+        if (busy || MessageBox.Show(this, "子桌面内所有程序将关闭，未保存内容可能丢失。继续？", restart ? "重建子会话" : "注销子会话", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
         Manage(async () => { await DisconnectDisplay(); await Task.Run(() => SessionManager.Stop(true)); if (restart) Connect(); });
     }
-    private void CopyConfig()
+    private void OpenSettings()
     {
-        var config = new { mcpServers = new Dictionary<string, object> { ["cua-child"] = new { command = Environment.ProcessPath, args = new[] { "mcp", "--driver", options.Driver, "--timeout", options.Timeout.ToString() } } } };
-        Clipboard.SetText(System.Text.Json.JsonSerializer.Serialize(config, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+        if (busy) return;
+        using var dialog = new DesktopSettingsDialog(settings);
+        if (dialog.ShowDialog(this) != DialogResult.OK) return;
+        settings = dialog.Value;
+        if (dialog.Reconnect) Manage(async () => { await DisconnectDisplay(); Connect(); });
     }
+    private void OpenMcpConfig() { if (busy) return; using var dialog = new McpConfigDialog(options); dialog.ShowDialog(this); }
     private void ToggleFullScreen()
     {
-        if (!fullScreen) { savedBounds = Bounds; savedWindowState = WindowState; WindowState = FormWindowState.Normal; FormBorderStyle = FormBorderStyle.None; Bounds = Screen.FromControl(this).Bounds; }
-        else { FormBorderStyle = FormBorderStyle.Sizable; Bounds = savedBounds; WindowState = savedWindowState; }
-        fullScreen = !fullScreen;
-        if (rdp.Connected == 1 && Settings().KeyboardMode == 2) rdp.SetKeyboardMode(fullScreen ? 1 : 0);
+        try {
+            if (!fullScreen) { savedBounds = Bounds; savedWindowState = WindowState; WindowState = FormWindowState.Normal; FormBorderStyle = FormBorderStyle.None; Bounds = Screen.FromControl(this).Bounds; }
+            else { FormBorderStyle = FormBorderStyle.Sizable; Bounds = savedBounds; WindowState = savedWindowState; }
+            fullScreen = !fullScreen; fullScreenButton.Text = fullScreen ? "退出全屏" : "全屏";
+            if (rdp.Connected == 1 && settings.KeyboardMode == 2) rdp.SetKeyboardMode(fullScreen ? 1 : 0);
+        } catch (Exception ex) { ShowNotice(ex.Message); }
     }
     private void EnableSystem() => Manage(async () =>
     {
-        var info = Program.StartInfo(Environment.ProcessPath!, "enable");
-        info.UseShellExecute = true; info.Verb = "runas"; info.WindowStyle = ProcessWindowStyle.Hidden;
-        using var process = Process.Start(info) ?? throw new IOException("无法启动系统启用工具。");
-        await process.WaitForExitAsync();
+        var info = Program.StartInfo(Environment.ProcessPath!, "enable"); info.UseShellExecute = true; info.Verb = "runas"; info.WindowStyle = ProcessWindowStyle.Hidden;
+        using var process = Process.Start(info) ?? throw new IOException("无法启动系统启用工具。"); await process.WaitForExitAsync();
         if (process.ExitCode != 0) throw new IOException("系统启用操作失败。");
         MessageBox.Show(this, "Child Sessions 已启用。首次启用后请保存工作并注销 Windows 后重新登录。", "系统设置");
     });
-    protected override void OnFormClosing(FormClosingEventArgs e)
+    private void Reveal() { Show(); if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal; Activate(); }
+    protected override void OnFormClosing(FormClosingEventArgs e) { if (!exiting && e.CloseReason == CloseReason.UserClosing) { e.Cancel = true; Hide(); } base.OnFormClosing(e); }
+    protected override void Dispose(bool disposing) { if (disposing) { timer.Dispose(); tray.Dispose(); } base.Dispose(disposing); }
+    internal static int VerifyIdlePanel()
     {
-        if (!exiting && e.CloseReason == CloseReason.UserClosing) { e.Cancel = true; Hide(); }
-        base.OnFormClosing(e);
+        uint? before = Native.ChildId(); using var signal = new EventWaitHandle(false, EventResetMode.AutoReset); using var form = new Viewer(signal, Options.Parse([]));
+        form.ShowInTaskbar = false; form.StartPosition = FormStartPosition.Manual; form.Location = new(-32000, -32000); form.Opacity = 0; form.Show(); Application.DoEvents();
+        if (form.rdp.Connected != 0 || Native.ChildId() != before) throw new Exception("Opening the control panel changed the child connection.");
+        if (Environment.GetEnvironmentVariable("CUA_UI_PREVIEW_DIR") is { Length: > 0 } directory)
+        {
+            Directory.CreateDirectory(directory);
+            Snapshot(form, Path.Combine(directory, "desktop.png"));
+            using var settings = new DesktopSettingsDialog(new());
+            Snapshot(settings, Path.Combine(directory, "settings.png"));
+            settings.ClientSize = new Size(460, 420);
+            Snapshot(settings, Path.Combine(directory, "settings-small.png"));
+            using var config = new McpConfigDialog(Options.Parse([]), Path.Combine(directory, "example.toml"));
+            Snapshot(config, Path.Combine(directory, "mcp-config.png"));
+        }
+        form.exiting = true; form.Close(); Console.Error.WriteLine("Idle desktop view verified; no child connection created."); return 0;
     }
-    protected override void Dispose(bool disposing)
+    private static void Snapshot(Form form, string file)
     {
-        if (disposing) { timer.Dispose(); tray.Dispose(); }
-        base.Dispose(disposing);
+        form.ShowInTaskbar = false; form.StartPosition = FormStartPosition.Manual; form.Location = new(-32000, -32000); form.Opacity = 0;
+        form.Show(); form.PerformLayout(); Application.DoEvents();
+        using var bitmap = new Bitmap(form.Width, form.Height);
+        form.DrawToBitmap(bitmap, new Rectangle(Point.Empty, bitmap.Size));
+        bitmap.Save(file);
     }
     internal static int Launch(Options options)
     {

@@ -20,6 +20,7 @@ internal static class Tests
     }
     internal static int Run()
     {
+        ConfigTests.Run();
         if (Options.Parse([]).Command != "view") throw new Exception("Default command");
         if (Options.Parse(["mcp"]).Command != "mcp") throw new Exception("Explicit MCP command");
         foreach (uint invalid in new uint[] { 0, 1, 4, uint.MaxValue })

@@ -47,16 +47,26 @@ tool_timeout_sec = 120
 
 显示实时 RDP 控制窗口。点击画面后鼠标键盘进入子桌面；支持窗口缩放、重连、状态显示和托盘隐藏。Ctrl+Alt+Home 释放键盘捕获。关闭窗口仅隐藏，应用与 MCP 继续运行；再次执行 `view` 或双击托盘图标恢复窗口。托盘菜单可退出控制器并断开显示，不注销子桌面。
 
+控制中心采用桌面优先布局：顶部管理工具，底部状态栏，远程桌面占据主体。设置使用独立滚动窗口，操作按钮固定在底部。
+
 控制中心提供：
 
 - 子会话启动/连接、断开画面、注销及重建。注销/重建会先提示关闭子桌面内的程序；主桌面不会被注销。
-- MCP Worker 状态、启动、停止及重启，以及复制 MCP 配置。手动启动 Worker 前先连接子桌面并完成登录。停止 Worker 会中断现有 MCP 调用；客户端重新连接可以再次启动它。
+- MCP Worker 状态、启动、停止及重启，以及 MCP 配置管理。手动启动 Worker 前先连接子桌面并完成登录。停止 Worker 会中断现有 MCP 调用；客户端重新连接可以再次启动它。
 - 分辨率预设和自定义尺寸（640–7680 × 480–4320）、16/32 位颜色、画面缩放、剪贴板和磁盘重定向、音频位置、Windows 组合键发送位置、窗口全屏。
 - 保存设置，或保存后重新连接显示；重新连接不注销会话。设置存于 `%LOCALAPPDATA%\CuaChild\view-settings.json`，应用启动不会自动建立连接。部分分辨率和重定向选项的生效仍取决于 Windows RDP 支持。
 
 “窗口全屏”放大控制器窗口；选择“组合键：仅窗口全屏”时，会随窗口模式切换发送位置。停止/重建功能需要新版会话宿主；遇到旧版宿主时会拒绝强制结束它，需先退出旧版宿主。
 
 `cua-child.exe status` 查看状态。`--driver <path>` 可选择其他 Driver 分发目录，`--timeout 90` 控制启动等待。
+
+### MCP 配置管理
+
+点击顶部 **MCP 配置**，可创建配置文件、添加 stdio 服务或修改已有服务。支持 Codex TOML（默认使用 CODEX_HOME 下的 config.toml，未设置时使用 ~/.codex/config.toml）和通用 mcpServers JSON。
+
+选择文件并读取后，选择已有服务名称修改，或输入新名称新增服务；可一键填入本程序路径，编辑命令、参数与 Codex 超时。点击预览检查合并后的完整配置，再保存。已有文件会生成同目录备份；若文件在读取后被其他程序改动，会拒绝覆盖并要求重新读取。
+
+编辑会保留其他服务及环境变量等额外字段，但可能重新排版。HTTP 服务不能通过此编辑器修改，JSON 文件需使用标准 JSON。保存后在对应客户端重新加载 MCP 服务。
 
 ## 构建
 
@@ -81,7 +91,7 @@ dotnet build -c Release
 
 如果重新登录后仍然出现，请提供 Windows 版本/版本号、账号类型（本地、Microsoft、域或 Entra ID）、登录方式（密码、PIN、指纹或智能卡）、`cua-child.exe status` 的输出及 `host-error.txt`（如果存在）。不要提供密码。这些信息用于区分父会话凭据、系统策略和 RDP 连接问题；本程序不自动修改凭据委派策略或关闭 NLA。
 
-控制窗口的“打开诊断日志”按钮可打开日志目录。`rdp-进程号.log` 默认记录可执行文件路径、进程号、配置地址/端口及连接状态变化，不记录密码。配置的 RDP-Tcp 端口不能证明子会话实际使用了该端点。连接卡住时，在管理员 PowerShell 中执行包内 `./collect-rdp-connection.ps1`，采集客户端实际 TCP 端点、对应监听器和进程信息。
+控制窗口的“更多 → 打开日志目录”菜单可打开日志目录。`rdp-进程号.log` 默认记录可执行文件路径、进程号、配置地址/端口及连接状态变化，不记录密码。配置的 RDP-Tcp 端口不能证明子会话实际使用了该端点。连接卡住时，在管理员 PowerShell 中执行包内 `./collect-rdp-connection.ps1`，采集客户端实际 TCP 端点、对应监听器和进程信息。
 
 COM 登录事件跟踪尚未完成实际连接兼容性验证，默认关闭；仅在专门对照测试时使用环境变量 `CUA_CHILD_RDP_EVENTS=1` 启用。RDP 已连接不等于 Windows 登录已完成。日志单文件超过 1 MiB 时保留一份上一段记录；各次运行的日志可在诊断后手动清理。切换程序版本前从托盘退出旧控制器，否则 `view` 会唤起仍在运行的旧实例。
 
@@ -118,3 +128,5 @@ CI 不运行需要交互桌面的 `integration-test.ps1`；完整 Child Session 
 本项目是独立的生命周期封装，基于 [Cua Driver](https://github.com/trycua/cua) 的公开 CLI 和 Windows API；不复制整个上游仓库。上游来源基线为 `b4e3caecd709311d613dde29ddac03e29468bb38`，分发依赖版本为 0.26.1。
 
 本项目采用 [MIT License](LICENSE)。Cua Driver 的许可证保留在 [CUA-LICENSE.md](CUA-LICENSE.md)。原创图标的生成方式和提示词见 [assets/PROVENANCE.md](assets/PROVENANCE.md)。本项目不代表 Microsoft、OpenAI 或 Cua 官方。
+
+TOML 解析使用 Tomlyn 0.19.0，其 BSD-2-Clause 许可证保留在 [TOMLYN-LICENSE.txt](TOMLYN-LICENSE.txt)。

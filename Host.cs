@@ -25,7 +25,9 @@ internal sealed class RdpControl : AxHost
     {
         get
         {
-            int state = Convert.ToInt32(((dynamic)GetOcx()!).Connected);
+            var control = GetOcx();
+            if (control is null) return 0;
+            int state = Convert.ToInt32(((dynamic)control).Connected);
             if (state != lastRecordedState) { Record($"Connected state={state} (0=disconnected, 1=connected, 2=connecting)"); lastRecordedState = state; }
             return state;
         }

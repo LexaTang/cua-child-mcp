@@ -25,6 +25,7 @@ Copy-Item "$PSScriptRoot/README.md" $OutputDirectory -Force
 Copy-Item "$PSScriptRoot/scripts/collect-rdp-connection.ps1" $OutputDirectory -Force
 Copy-Item "$PSScriptRoot/assets" $OutputDirectory -Recurse -Force
 Copy-Item "$PSScriptRoot/LICENSE" $OutputDirectory -Force
+Copy-Item "$PSScriptRoot/TOMLYN-LICENSE.txt" $OutputDirectory -Force
 Copy-Item "$PSScriptRoot/CUA-LICENSE.md" (Join-Path $OutputDirectory 'CUA-LICENSE') -Force
 # A portable archive must not ship a config pointing to the build machine.
 # Remove the file produced by older versions when reusing an output directory.

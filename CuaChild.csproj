@@ -7,4 +7,5 @@
     <ApplicationIcon>assets/app.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup><EmbeddedResource Include="assets/app.ico" LogicalName="CuaChild.AppIcon" /></ItemGroup>
+  <ItemGroup><PackageReference Include="Tomlyn" Version="0.19.0" /></ItemGroup>
 </Project>
