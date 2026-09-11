@@ -85,8 +85,15 @@ internal sealed class RdpControl : AxHost
         RemoveDiagnosticEvents();
         base.DetachSink();
     }
-    internal void ConnectChild()
+    internal void DisconnectChild()
     {
+        if (Connected != 0) ((dynamic)GetOcx()!).Disconnect();
+    }
+    internal void SetKeyboardMode(int mode) => ((dynamic)GetOcx()!).SecuredSettings2.KeyboardHookMode = mode;
+    internal void ConnectChild(DesktopSettings? settings = null)
+    {
+        settings ??= DesktopSettings.Load();
+        settings.Validate();
         // Keep COM event instrumentation opt-in until real-connection compatibility
         // has been verified. Default connections use the original no-sink path.
         bool traceEvents = Environment.GetEnvironmentVariable("CUA_CHILD_RDP_EVENTS") == "1";
@@ -95,16 +102,17 @@ internal sealed class RdpControl : AxHost
         dynamic rdp = GetOcx()!;
         object yes = true;
         rdp.Server = "localhost";
-        rdp.DesktopWidth = 1920;
-        rdp.DesktopHeight = 1080;
-        rdp.ColorDepth = 32;
+        rdp.DesktopWidth = settings.Width;
+        rdp.DesktopHeight = settings.Height;
+        rdp.ColorDepth = settings.ColorDepth;
         rdp.AdvancedSettings7.EnableCredSspSupport = true;
         using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp");
         rdp.AdvancedSettings7.RDPPort = Convert.ToInt32(key?.GetValue("PortNumber", 3389) ?? 3389);
-        rdp.AdvancedSettings7.SmartSizing = true;
-        rdp.SecuredSettings2.KeyboardHookMode = 1;
-        rdp.AdvancedSettings2.RedirectDrives = false;
-        rdp.AdvancedSettings6.RedirectClipboard = false;
+        rdp.AdvancedSettings7.SmartSizing = settings.SmartSizing;
+        rdp.SecuredSettings2.KeyboardHookMode = settings.KeyboardMode;
+        rdp.SecuredSettings2.AudioRedirectionMode = settings.AudioMode;
+        rdp.AdvancedSettings2.RedirectDrives = settings.Drives;
+        rdp.AdvancedSettings6.RedirectClipboard = settings.Clipboard;
         ((IExtendedSettings)GetOcx()!).SetProperty("ConnectToChildSession", ref yes);
         Record($"ConnectChild: exe={Environment.ProcessPath}, pid={Environment.ProcessId}, os={Environment.OSVersion.Version}, parent={Process.GetCurrentProcess().SessionId}, server=localhost, configuredRdpPort={rdp.AdvancedSettings7.RDPPort}, ConnectToChildSession set=true, CredSSP=true, eventTrace={traceEvents}. Configured port is not proof of the child transport's actual endpoint.");
         GetOcx()!.GetType().InvokeMember("Connect", System.Reflection.BindingFlags.InvokeMethod, null, GetOcx(), null);
@@ -113,6 +121,7 @@ internal sealed class RdpControl : AxHost
 
 internal sealed class Host : Form
 {
+    private readonly EventWaitHandle stopRequest = new(false, EventResetMode.AutoReset, SessionManager.StopHostEvent);
     private readonly Options options;
     private readonly RdpControl rdp = new() { Dock = DockStyle.Fill };
     private readonly System.Windows.Forms.Timer timer = new() { Interval = 500 };
@@ -150,6 +159,7 @@ internal sealed class Host : Form
     {
         try
         {
+            if (stopRequest.WaitOne(0)) { timer.Stop(); CleanupTask(); Close(); return; }
             if (Program.Ready())
             {
                 workerSeen = true;
@@ -207,6 +217,11 @@ internal sealed class Host : Form
         File.WriteAllText(Path.Combine(Program.StateDir, "host-error.txt"), ex.ToString());
         try { CleanupTask(); } catch { }
         Close();
+    }
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing) { timer.Dispose(); stopRequest.Dispose(); }
+        base.Dispose(disposing);
     }
     internal static int Run(Options options)
     {

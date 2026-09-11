@@ -25,6 +25,12 @@ internal static class Native
         if (!WTSQuerySessionInformation(IntPtr.Zero, id, 8, out var buffer, out _)) return false;
         try { return Marshal.ReadInt32(buffer) == 0; } finally { WTSFreeMemory(buffer); }
     }
+    internal static bool Exists(uint id)
+    {
+        if (!WTSQuerySessionInformation(IntPtr.Zero, id, 8, out var buffer, out _)) return false;
+        WTSFreeMemory(buffer);
+        return true;
+    }
     internal const string SignInAgain = "Windows Child Sessions were just enabled. Save your work, sign out of Windows and sign in again (or restart), then retry. The existing parent logon may not have credentials for automatic child-session sign-in.";
     internal const string CredentialHelp = "If localhost asks for credentials after first-time setup, save your work and sign out of Windows and sign in again (or restart). If it persists, report the Windows edition and sign-in method; see README troubleshooting.";
     internal static bool Enable()
@@ -44,13 +50,13 @@ internal sealed record Options(string Command, string Driver, int Timeout)
 {
     internal static Options Parse(string[] args)
     {
-        string command = "mcp", driver = Path.Combine(AppContext.BaseDirectory, "driver", "cua-driver.exe");
+        string command = "view", driver = Path.Combine(AppContext.BaseDirectory, "driver", "cua-driver.exe");
         int timeout = 90;
         for (int i = 0; i < args.Length; i++)
         {
             switch (args[i])
             {
-                case "mcp" or "host" or "view" or "viewer-host" or "enable" or "status" or "self-test" or "rdp-self-test" or "config": command = args[i]; break;
+                case "mcp" or "host" or "view" or "viewer-host" or "enable" or "status" or "self-test" or "rdp-self-test" or "panel-self-test" or "config": command = args[i]; break;
                 case "--help" or "-h": command = "help"; break;
                 case "--driver": driver = Path.GetFullPath(args[++i]); break;
                 case "--timeout": timeout = int.Parse(args[++i]); break;
@@ -77,11 +83,12 @@ internal static class Program
             var options = Options.Parse(args);
             if (options.Command == "help")
             {
-                Console.WriteLine("cua-child [mcp|view|status|enable|config] [--driver <cua-driver.exe>] [--timeout <seconds>]\nDefault: ensure a Windows Child Session worker, then proxy upstream stdio MCP.\nconfig prints MCP JSON for this executable's current location.\nThe child session stays alive after MCP disconnects. enable may require elevation.");
+                Console.WriteLine("cua-child [view|mcp|status|enable|config] [--driver <cua-driver.exe>] [--timeout <seconds>]\nDefault: open the control panel without starting a session.\nmcp explicitly starts/reuses the child worker and proxies stdio MCP.\nconfig prints MCP JSON for this executable's current location.\nenable may require elevation.");
                 return 0;
             }
             if (options.Command == "self-test") return Tests.Run();
             if (options.Command == "rdp-self-test") return Tests.RunRdp();
+            if (options.Command == "panel-self-test") return Viewer.VerifyIdlePanel();
             if (options.Command == "config")
             {
                 var server = new { command = Path.Combine(AppContext.BaseDirectory, "cua-child.exe"), args = new[] { "mcp", "--driver", options.Driver, "--timeout", options.Timeout.ToString() } };
@@ -94,10 +101,10 @@ internal static class Program
                 Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new { childSessionId = Native.ChildId(), workerReady = Ready(), socket = Socket, logDirectory = StateDir }));
                 return 0;
             }
-            if (!File.Exists(options.Driver)) throw new FileNotFoundException("Bundled driver missing; run package.ps1 or pass --driver.", options.Driver);
             if (Process.GetCurrentProcess().SessionId == 0) throw new InvalidOperationException("Start cua-child from a logged-in interactive parent session, not Session 0.");
             if (options.Command == "view") return Viewer.Launch(options);
             if (options.Command == "viewer-host") return Viewer.Run(options);
+            if (!File.Exists(options.Driver)) throw new FileNotFoundException("Bundled driver missing; run package.ps1 or pass --driver.", options.Driver);
             if (options.Command == "host") return Host.Run(options);
             Ensure(options);
             return Proxy(options.Driver);
