@@ -84,7 +84,7 @@ internal sealed class Viewer : Form
         tray = new NotifyIcon { Icon = AppBrand.Icon, Text = "Cua 子桌面控制", ContextMenuStrip = menu, Visible = true };
         tray.DoubleClick += (_, _) => Reveal();
         timer.Tick += (_, _) => Poll();
-        Section("子会话（打开面板不会自动启动）");
+        Section("子会话");
         AddButton("启动 / 连接子桌面", () => Connect());
         AddButton("断开画面（保留会话）", () => Manage(DisconnectDisplay));
         AddButton("注销子会话…", () => EndSession(false));
